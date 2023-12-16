@@ -1,95 +1,105 @@
 #include <iostream>
-#include <pigpio.h>
-#include <chrono>
-#include <thread>
+#include <pigpiod_if2.h>
+#include <unistd.h>
+#include <ctime>
+
+int pi = pigpio_start(NULL, NULL); // Connect to the pigpiod daemon
+
+// define Motor pins
+#define MOTOR_PIN1 6
+#define MOTOR_PIN2 13
+#define MOTOR_PIN3 19
+#define MOTOR_PIN4 26
+
+#define MOTOR_DELAY 10 // Delay in ms
+#define MOTOR_STEPS 150 // Number of steps
 
 class Motor {
 public:
-    Motor(int gpio1, int gpio2, int gpio3, int gpio4);
+    Motor();
     ~Motor();
 
-    void rotateClockwise();
-    void rotateCounterClockwise();
-    void stopRotation();
-
-    void runPeriodicRotation();
+    void setStep(int out1, int out2, int out3, int out4);
+    void rotateClockwise();//void forward(double delay, int steps);
+    void rotateCounterClockwise(); //void backwards(double delay, int steps);
+    void startMotorEveryFiveMinutes(double delay, int steps);
 
 private:
-    int pins[4];
-    bool isRotating;
+    static const int Seq[][4];
 };
 
-Motor::Motor(int gpio1, int gpio2, int gpio3, int gpio4) {
-    pins[0] = gpio1;
-    pins[1] = gpio2;
-    pins[2] = gpio3;
-    pins[3] = gpio4;
+const int Motor::Seq[][4] = {
+    {0, 1, 0, 0},
+    {0, 1, 0, 1},
+    {0, 0, 0, 1},
+    {1, 0, 0, 1},
+    {1, 0, 0, 0},
+    {1, 0, 1, 0},
+    {0, 0, 1, 0},
+    {0, 1, 1, 0}
+};
 
-    if (gpioInitialise() < 0) {
-        std::cerr << "pigpio initialization failed." << std::endl;
-        // Handle initialization failure
-    }
-
-    for (int i = 0; i < 4; ++i) {
-        gpioSetMode(pins[i], PI_OUTPUT);
-    }
-
-    isRotating = false;
+Motor::Motor() {
+    set_mode(pi, MOTOR_PIN1, PI_OUTPUT);
+    set_mode(pi, MOTOR_PIN2, PI_OUTPUT);
+    set_mode(pi, MOTOR_PIN3, PI_OUTPUT);
+    set_mode(pi, MOTOR_PIN4, PI_OUTPUT);
 }
 
 Motor::~Motor() {
-    gpioTerminate();
+    pigpio_stop(pi);
 }
 
-void Motor::rotateClockwise() {
-    // Implement the logic to rotate the motor clockwise
-    // Modify the GPIO signals based on the 28BYJ-48 motor sequence
+void Motor::setStep(int out1, int out2, int out3, int out4) {
+    gpio_write(pi, MOTOR_PIN2, out1);
+    gpio_write(pi, MOTOR_PIN4, out2);
+    gpio_write(pi, MOTOR_PIN3, out3);
+    gpio_write(pi, MOTOR_PIN1, out4);
 }
 
-void Motor::rotateCounterClockwise() {
-    // Implement the logic to rotate the motor counter-clockwise
-    // Modify the GPIO signals based on the 28BYJ-48 motor sequence
+void Motor::rotateClockwise() { //forward
+for (int i = 0; i < MOTOR_STEPS; ++i) {
+        for (int j = 0; j < 8; ++j) {
+            setStep(Seq[j][0], Seq[j][1], Seq[j][2], Seq[j][3]);
+            time_sleep(MOTOR_DELAY/ 1000.0);
+        }
+    }
 }
 
-void Motor::stopRotation() {
-    // Implement the logic to stop the motor rotation
+void Motor::rotateCounterClockwise() { //backward
+    for (int i = 0; i < MOTOR_STEPS; ++i) {
+        for (int j = 7; j >= 0; --j) {
+            setStep(Seq[j][0], Seq[j][1], Seq[j][2], Seq[j][3]);
+            time_sleep(MOTOR_DELAY/ 1000.0);
+        }
+    }
 }
 
-void Motor::runPeriodicRotation() {
-    while (true) {
-        // Get the current system time
-        auto currentTime = std::chrono::system_clock::now();
-        auto currentTimePoint = std::chrono::time_point_cast<std::chrono::minutes>(currentTime);
-        auto nextRotationTime = currentTimePoint + std::chrono::minutes(5);
+void Motor::startMotorEveryFiveMinutes() {
+    time_t now = time(0);
+    tm* ltm = localtime(&now);
 
-        // Calculate the duration until the next rotation
-        auto durationUntilNextRotation = std::chrono::duration_cast<std::chrono::milliseconds>(nextRotationTime - currentTime);
-
-        // Sleep until it's time for the next rotation
-        std::this_thread::sleep_for(durationUntilNextRotation);
-
-        // Rotate the motor clockwise when it's time
+    if (ltm->tm_min % 5 == 0) {
+        std::cout << "Motor gestart op: " << asctime(ltm);
         rotateClockwise();
+    } else {
 
-        // Sleep for a short duration to allow the motor to rotate
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-
-        // Stop the rotation
-        stopRotation();
     }
 }
 
 int main() {
-    // GPIO pins connected to the 28BYJ-48 motor
-    int gpio1 = 17;  // Modify these values based on your actual GPIO connections
-    int gpio2 = 18;
-    int gpio3 = 27;
-    int gpio4 = 22;
+    if (pi < 0) {
+        std::cerr << "Failed to initialize pigpio: " << pigpio_error(pi) << std::endl;
+        return 1;
+    }
 
-    Motor motor(gpio1, gpio2, gpio3, gpio4);
+    Motor motor;
 
-    // Run the motor rotation periodically
-    motor.runPeriodicRotation();
+    while (true) {
+        motor.startMotorEveryFiveMinutes();
+
+        sleep(50); // Wacht 1 minuut voordat de cyclus opnieuw begint
+    }
 
     return 0;
 }
