@@ -76,7 +76,7 @@ void Motor::backwards(double delay, int steps) {
         for (int j = 7; j >= 0; --j) {
             setStep(Seq[j][0], Seq[j][1], Seq[j][2], Seq[j][3]);
             time_sleep(delay);
- }
+         }
     }
 }
 
