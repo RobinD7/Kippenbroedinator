@@ -1,126 +1,111 @@
 #include <pigpiod_if2.h>
+#include <iostream>
 #include <unistd.h>
 
-class Display {
-public:
-    Display();
-    ~Display();
+// Define GPIO to LCD mapping
+#define LCD_RS 21
+#define LCD_E  17
+#define LCD_D4 22
+#define LCD_D5 23
+#define LCD_D6 24
+#define LCD_D7 25
 
-    void initialize();
-    void sendCommand(uint8_t command);
-    void sendData(uint8_t data);
-    void sendString(const char* str);
-    void clearDisplay();
-    void setPosition(uint8_t row, uint8_t col);
+// Define some device constants
+#define LCD_WIDTH 16    // Maximum characters per line
+#define LCD_CHR true
+#define LCD_CMD false
 
-private:
-    int pi_;
-    int rs_;
-    int e_;
-    int d4_;
-    int d5_;
-    int d6_;
-    int d7_;
-};
+#define LCD_LINE_1 0x80 // LCD RAM address for the 1st line
+#define LCD_LINE_2 0xC0 // LCD RAM address for the 2nd line
 
-Display::Display() {
-    pi_ = pigpio_start(NULL, NULL);
-    if (pi_ < 0) {
-        fprintf(stderr, "Unable to initialize pigpio\n");
-        exit(EXIT_FAILURE);
-    }
+// Timing constants
+#define E_PULSE 0.00005
+#define E_DELAY 0.00005
 
-    rs_ = 2;  // LCD_RS = 2
-    e_ = 3;   // LCD_E  = 3
-    d4_ = 25; // LCD_D4 = 25
-    d5_ = 8;  // LCD_D5 = 8
-    d6_ = 7;  // LCD_D6 = 7
-    d7_ = 1;  // LCD_D7 = 1
-}
-
-Display::~Display() {
-    pigpio_stop(pi_);
-}
-
-void Display::initialize() {
-    gpio_write(pi_, rs_, PI_LOW);
-    gpio_write(pi_, e_, PI_LOW);
-
-    usleep(50000); // 50ms delay
-
-    sendCommand(0x33);
-    sendCommand(0x32);
-    sendCommand(0x28); // Function set: 4-bit, 2-line, 5x8 font
-    sendCommand(0x0C); // Display ON, Cursor OFF, Blink OFF
-    sendCommand(0x06); // Entry mode set: Increment, no shift
-    sendCommand(0x01); // Clear display
-
-    usleep(2000); // 2ms delay
-}
-
-void Display::sendCommand(uint8_t command) {
-    gpio_write(pi_, rs_, PI_LOW);
-    sendData(command);
-}
-
-void Display::sendData(uint8_t data) {
-    gpio_write(pi_, d4_, (data & 0x10) >> 4);
-    gpio_write(pi_, d5_, (data & 0x20) >> 5);
-    gpio_write(pi_, d6_, (data & 0x40) >> 6);
-    gpio_write(pi_, d7_, (data & 0x80) >> 7);
-
-    gpio_write(pi_, e_, PI_HIGH);
-    usleep(1);
-    gpio_write(pi_, e_, PI_LOW);
-    usleep(1);
-
-    gpio_write(pi_, d4_, (data & 0x01));
-    gpio_write(pi_, d5_, (data & 0x02) >> 1);
-    gpio_write(pi_, d6_, (data & 0x04) >> 2);
-    gpio_write(pi_, d7_, (data & 0x08) >> 3);
-
-    gpio_write(pi_, e_, PI_HIGH);
-    usleep(1);
-    gpio_write(pi_, e_, PI_LOW);
-    usleep(1);
-}
-
-void Display::sendString(const char* str) {
-    while (*str) {
-        sendData(*str++);
-    }
-}
-
-void Display::clearDisplay() {
-    sendCommand(0x01); // Clear display
-    usleep(2000); // 2ms delay
-}
-
-void Display::setPosition(uint8_t row, uint8_t col) {
-    uint8_t address = 0x80;
-
-    switch (row) {
-    case 1:
-        address += 0x40;
-        break;
-    case 2:
-        address += 0x14;
-        break;
-    case 3:
-        address += 0x54;
-        break;
-    }
-
-    address += col;
-    sendCommand(address);
-}
+// Function declarations
+void lcd_init(int pi);
+void lcd_string(int pi, const char* message);
+void lcd_byte(int pi, int bits, bool mode);
 
 int main() {
-    Display lcd;
-    lcd.initialize();
-    lcd.clearDisplay();
-    lcd.setPosition(1, 0); // Set cursor to the first row, first column
-    lcd.sendString("Hello, World!");
+    // Connect to pigpiod daemon
+    int pi = pigpio_start(NULL, NULL);
+    if (pi < 0) {
+        std::cerr << "Failed to connect to pigpiod daemon" << std::endl;
+        return 1;
+    }
+
+    // Initialise display
+    lcd_init(pi);
+
+    // Send some test
+    lcd_byte(pi, LCD_LINE_1, LCD_CMD);
+    lcd_string(pi, "Raspberry Pi");
+    lcd_byte(pi, LCD_LINE_2, LCD_CMD);
+    lcd_string(pi, "Model B");
+
+    usleep(3000000); // 3-second delay
+
+    // Send some text
+    lcd_byte(pi, LCD_LINE_1, LCD_CMD);
+    lcd_string(pi, "Raspberrypi-spy");
+    lcd_byte(pi, LCD_LINE_2, LCD_CMD);
+    lcd_string(pi, ".co.uk");
+
+    usleep(20000000); // 20-second delay
+
+    // Disconnect from pigpiod daemon
+    pigpio_stop(pi);
 
     return 0;
+}
+
+void lcd_init(int pi) {
+    // Initialise display
+    lcd_byte(pi, 0x33, LCD_CMD);
+    lcd_byte(pi, 0x32, LCD_CMD);
+    lcd_byte(pi, 0x28, LCD_CMD);
+    lcd_byte(pi, 0x0C, LCD_CMD);
+    lcd_byte(pi, 0x06, LCD_CMD);
+    lcd_byte(pi, 0x01, LCD_CMD);
+}
+
+void lcd_string(int pi, const char* message) {
+    // Send string to display
+    for (int i = 0; i < LCD_WIDTH; ++i) {
+        lcd_byte(pi, message[i], LCD_CHR);
+    }
+}
+
+void lcd_byte(int pi, int bits, bool mode) {
+    // Send byte to data pins
+    // bits = data
+    // mode = true for character, false for command
+
+    // High bits
+    gpio_write(pi, LCD_RS, mode);
+    gpio_write(pi, LCD_D4, (bits & 0x10) == 0x10);
+    gpio_write(pi, LCD_D5, (bits & 0x20) == 0x20);
+    gpio_write(pi, LCD_D6, (bits & 0x40) == 0x40);
+    gpio_write(pi, LCD_D7, (bits & 0x80) == 0x80);
+
+    // Toggle 'Enable' pin
+    usleep(E_DELAY);
+    gpio_write(pi, LCD_E, true);
+    usleep(E_PULSE);
+    gpio_write(pi, LCD_E, false);
+    usleep(E_DELAY);
+
+    // Low bits
+    gpio_write(pi, LCD_D4, (bits & 0x01) == 0x01);
+    gpio_write(pi, LCD_D5, (bits & 0x02) == 0x02);
+    gpio_write(pi, LCD_D6, (bits & 0x04) == 0x04);
+    gpio_write(pi, LCD_D7, (bits & 0x08) == 0x08);
+
+    // Toggle 'Enable' pin
+    usleep(E_DELAY);
+    gpio_write(pi, LCD_E, true);
+    usleep(E_PULSE);
+    gpio_write(pi, LCD_E, false);
+    usleep(E_DELAY);
 }
